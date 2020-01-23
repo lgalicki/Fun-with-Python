@@ -10,6 +10,8 @@ based on the information that was given and generate a graph showing the price
 per m² in every neighbourhood of the informed CITY.
 """
 import sys
+import re
+import json
 import requests
 from bs4 import BeautifulSoup
 import unidecode
@@ -94,7 +96,32 @@ def format_neighbourhood(neighbourhood):
     return unidecode.unidecode(brk_nh_text[1]).title()
 
 
-def parse_html(html):
+def remove_item_nh(items, neighbourhood):
+    '''
+    Removes items from a given neighbourhood from the items list.
+
+    Parameters
+    ----------
+    items : list
+        The list in which the objects are stored.
+    neighbourhood : str
+        The neighbourhood that must be removed from the list of items.
+
+    Returns
+    -------
+    bool
+        True if there was still an item that had to be removed.
+
+    '''
+    for pos, item_nh in enumerate(items):
+        if item_nh[2] == neighbourhood:
+            items.pop(pos)
+            return True
+
+    return False
+
+
+def parse_html(html, links):
     '''
     Validates HTML and, if it's good, extracts information from it.
 
@@ -135,17 +162,17 @@ def parse_html(html):
     f_sizes = [format_size(size) for size in sizes]
     f_nhs = [format_neighbourhood(nh) for nh in nhs]
 
-    zipped = zip(f_prices, f_sizes, f_nhs)
+    zipped = zip(f_prices, f_sizes, f_nhs, links)
 
     return zipped, total_items
 
 
 if __name__ == '__main__':
     # Setting up the variable parts of the URL
-    CITY = 'curitiba'
+    CITY = 'campo-largo'
     COUNTY = 'pr'
     TRANS = 'venda'
-    #TYPE_UN = 'apartamentos'
+    # TYPE_UN = 'apartamentos'
     TYPE_UN = 'casas'
     LOC = f'{COUNTY}+{CITY}'
     PG = 1
@@ -156,15 +183,31 @@ if __name__ == '__main__':
                             'Gecko/20100101 Firefox/72.0'}
 
     # Now let's loop through the pages
-    ITEMS = tuple()
+    ITEMS = list()
     RESPONSE = requests.get(url=URL, headers=HEADERS)
+
+    # While parsing we must check if the returned page is good. By good I mean
+    # a page with results. The site often returns blank pages with 200 as return
+    # code. When we reach these blank pages there's no need to keep on going.
     PARSE_RETURN = (True, 0)
     while RESPONSE.ok and PARSE_RETURN[0]:
-        # While parsing we must check if the returned page is good. By good I
-        # mean a page with results. The site often returns blank pages with 200
-        # return code. When we reach these blank pages there's no need to keep
-        # on going.
-        PARSE_RETURN = parse_html(RESPONSE.text)
+
+        # The page will return all kinds of info in JavaScript object which can
+        # be de-JSONed into a dictionary. Here's we'll get the HREF for each
+        # item returned. It will be passed to the HTML parser.
+        JSON_OBJECT = '{' + re.search(r'window.__INITIAL_STATE__={(.*)};',
+                                      RESPONSE.text).groups()[0] + '}'
+        RESPONSE_DATA = json.loads(JSON_OBJECT, encoding='UTF-8')
+
+        LINKS = list()
+        for item in RESPONSE_DATA['results']['listings']:
+            # print(item['listing']['title'])
+            # print(item['link']['href'])
+            LINKS.append(item['link']['href'])
+
+        # Finally parsing the HTML, passing the links so they can be grouped to
+        # their respective HTML info.
+        PARSE_RETURN = parse_html(RESPONSE.text, LINKS)
 
         if PARSE_RETURN[0]:
             PAGE_CONTENTS = PARSE_RETURN[0]
@@ -178,8 +221,26 @@ if __name__ == '__main__':
             print(f'Fetching info. {len(ITEMS)} items of {TOT_ITEMS} so far.',
                   end='\r')
 
+    # Excluding neighbourhoods with too little units. They're probably not from
+    # the desired city. Right now it's configure to exclude neighbourhoods with
+    # 2% or less of the total population
+    QT_PER_ITEM = dict()
+    for item in ITEMS:
+        QT_PER_ITEM[item[2]] = QT_PER_ITEM.get(item[2], 0) + 1
+
+    TWO_PERCENT = round(len(ITEMS) * 0.02)
+    print(f'\nLimit to be considered: {TWO_PERCENT}')
+
+    for k, v in QT_PER_ITEM.items():
+        if v < TWO_PERCENT:
+            print(f'Items for {k}: {v} [IGNORED]')
+            while remove_item_nh(ITEMS, k):
+                pass
+        else:
+            print(f'Items for {k}: {v}')
+
     # Now let's set our DataFrame
-    DF = pd.DataFrame(ITEMS, columns=['Price', 'Size', 'Neighbourhood'])
+    DF = pd.DataFrame(ITEMS, columns=['Price', 'Size', 'Neighbourhood', 'URL'])
     DF.dropna(inplace=True)
     DF['Price m²'] = [int(price / size) for size, price in zip(DF['Size'], DF['Price'])]
 
@@ -209,7 +270,7 @@ if __name__ == '__main__':
         elif MORE_DETAILS.lower() == 'y':
             NH_DET = str()
             while NH_DET not in list(MEAN_SERIES.index) or NH_DET.lower() == 'q':
-                ND_DET = input('Name of neighbourhood as shown in the graph (q to quit): ')
+                NH_DET = input('Name of neighbourhood as shown in the graph (q to quit): ')
                 NH_DET = unidecode.unidecode(NH_DET).title()
 
                 if NH_DET.lower() == 'q':
@@ -227,7 +288,7 @@ if __name__ == '__main__':
 
                     # And the graph for the specific neighbourhood
                     DATA = [go.Scatter(x=NH_DF['Price'], y=NH_DF['Size'],
-                                       mode='markers',)]
+                                       hovertext=NH_DF['URL'], mode='markers',)]
                     FIG = go.Figure(data=DATA, layout=LAYOUT)
                     pyo.iplot(FIG, filename=f'{NH_DET}.html')
 
