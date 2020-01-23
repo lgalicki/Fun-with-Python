@@ -96,7 +96,7 @@ def format_neighbourhood(neighbourhood):
     return unidecode.unidecode(brk_nh_text[1]).title()
 
 
-def remove_item_nh(items, neighbourhood):
+def remove_item_nh(items_nh, neighbourhood):
     '''
     Removes items from a given neighbourhood from the items list.
 
@@ -113,9 +113,9 @@ def remove_item_nh(items, neighbourhood):
         True if there was still an item that had to be removed.
 
     '''
-    for pos, item_nh in enumerate(items):
+    for pos_nh, item_nh in enumerate(items_nh):
         if item_nh[2] == neighbourhood:
-            items.pop(pos)
+            items_nh.pop(pos_nh)
             return True
 
     return False
@@ -161,15 +161,40 @@ def parse_html(html, links):
     f_prices = [format_price(price) for price in prices]
     f_sizes = [format_size(size) for size in sizes]
     f_nhs = [format_neighbourhood(nh) for nh in nhs]
+    m2_a = [int(price/size) for price, size in list(zip(f_prices, f_sizes))]
 
-    zipped = zip(f_prices, f_sizes, f_nhs, links)
+    zipped = zip(f_prices, f_sizes, f_nhs, links, m2_a)
 
     return zipped, total_items
+
+def clean_items(items_ci, remove_item):
+    """
+    Cleans outliers that are too cheap or to expesinve for their neighbourhood.
+
+    Parameters
+    ----------
+    items_ci : tuple
+        The list of all items retrieved from the web.
+    remove_item : tuple
+        A tuple which represents one item in the list of items above.
+
+    Returns
+    -------
+    bool
+        Will return True if a object as deleted and False if none was.
+
+    """
+    for pos_ci, item_ci in enumerate(items_ci):
+        if item_ci[3] == remove_item[3]:
+            items_ci.pop(pos_ci)
+            return True
+
+    return False
 
 
 if __name__ == '__main__':
     # Setting up the variable parts of the URL
-    CITY = 'campo-largo'
+    CITY = 'curitiba'
     COUNTY = 'pr'
     TRANS = 'venda'
     # TYPE_UN = 'apartamentos'
@@ -203,7 +228,7 @@ if __name__ == '__main__':
         for item in RESPONSE_DATA['results']['listings']:
             # print(item['listing']['title'])
             # print(item['link']['href'])
-            LINKS.append(item['link']['href'])
+            LINKS.append(f"https://www.zapimoveis.com.br/imovel{item['link']['href']}")
 
         # Finally parsing the HTML, passing the links so they can be grouped to
         # their respective HTML info.
@@ -224,25 +249,61 @@ if __name__ == '__main__':
     # Excluding neighbourhoods with too little units. They're probably not from
     # the desired city. Right now it's configure to exclude neighbourhoods with
     # 2% or less of the total population
-    QT_PER_ITEM = dict()
+    ITEMS_FOR_NH = dict()
     for item in ITEMS:
-        QT_PER_ITEM[item[2]] = QT_PER_ITEM.get(item[2], 0) + 1
+        ITEMS_FOR_NH[item[2]] = ITEMS_FOR_NH.get(item[2], 0) + 1
 
-    TWO_PERCENT = round(len(ITEMS) * 0.02)
-    print(f'\nLimit to be considered: {TWO_PERCENT}')
+    MIN_ITEMS = round(len(ITEMS) * 0.0004)
+    print(f'\nLimit to be considered: {MIN_ITEMS}')
 
-    for k, v in QT_PER_ITEM.items():
-        if v < TWO_PERCENT:
+    for k, v in ITEMS_FOR_NH.items():
+        if v < MIN_ITEMS:
             print(f'Items for {k}: {v} [IGNORED]')
             while remove_item_nh(ITEMS, k):
                 pass
         else:
             print(f'Items for {k}: {v}')
 
+    # Here we exclude the outliers that have a price per m² to far away from
+    # the mean of the neighbourhood. Items with a price three times or more, or
+    # a tenth or less of the mean will be excluded from the data. I'll move None
+    # to the price per m² and pandas will ignore the item. First the high outliers.
+    NH_MEAN = dict()
+    for item in ITEMS:
+        NH_MEAN[item[2]] = NH_MEAN.get(item[2], 0) + item[4]
+
+    NH_MEAN = {k:v/ITEMS_FOR_NH[k] for k, v in NH_MEAN.items()}
+
+    REMOVE_ITEMS = list()
+    for pos, item in enumerate(ITEMS):
+        if item[4] > 3 * NH_MEAN[item[2]]:
+            REMOVE_ITEMS.append(item)
+
+    for item in REMOVE_ITEMS:
+        while clean_items(ITEMS, item):
+            pass
+
+    #Now the low outliers
+    NH_MEAN = dict()
+    for item in ITEMS:
+        NH_MEAN[item[2]] = NH_MEAN.get(item[2], 0) + item[4]
+
+    NH_MEAN = {k:v/ITEMS_FOR_NH[k] for k, v in NH_MEAN.items()}
+
+    REMOVE_ITEMS = list()
+    for item in ITEMS:
+        if item[4] < NH_MEAN[item[2]] / 3:
+            REMOVE_ITEMS.append(item)
+
+    for item in REMOVE_ITEMS:
+        while clean_items(ITEMS, item):
+            pass
+
     # Now let's set our DataFrame
-    DF = pd.DataFrame(ITEMS, columns=['Price', 'Size', 'Neighbourhood', 'URL'])
+    DF = pd.DataFrame(ITEMS, columns=['Price', 'Size', 'Neighbourhood', 'URL',
+                                      'Price m²'])
     DF.dropna(inplace=True)
-    DF['Price m²'] = [int(price / size) for size, price in zip(DF['Size'], DF['Price'])]
+    # DF['Price m²'] = [int(price / size) for size, price in zip(DF['Size'], DF['Price'])]
 
     # Generating and formatting a serie with m² mean per neighbourhood
     GROUPED_DF = DF.groupby('Neighbourhood')
@@ -270,7 +331,8 @@ if __name__ == '__main__':
         elif MORE_DETAILS.lower() == 'y':
             NH_DET = str()
             while NH_DET not in list(MEAN_SERIES.index) or NH_DET.lower() == 'q':
-                NH_DET = input('Name of neighbourhood as shown in the graph (q to quit): ')
+                NH_DET = input('Name of neighbourhood as shown in the graph'
+                               ' (q to quit): ')
                 NH_DET = unidecode.unidecode(NH_DET).title()
 
                 if NH_DET.lower() == 'q':
@@ -281,7 +343,7 @@ if __name__ == '__main__':
                     #Defining layout
                     LAYOUT = go.Layout(title=f'Items in {NH_DET}',
                                        xaxis=dict(title="Price (R$)"),
-                                       yaxis=dict(title="Size (m²"))
+                                       yaxis=dict(title="Size (m²)"))
 
                     # Creating a DF for the specific neighbourhood
                     NH_DF = DF[DF['Neighbourhood'] == NH_DET]
