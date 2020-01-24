@@ -12,12 +12,14 @@ per m² in every neighbourhood of the informed CITY.
 import sys
 import re
 import json
+import webbrowser
 import requests
 from bs4 import BeautifulSoup
 import unidecode
 import pandas as pd
 import plotly.offline as pyo
 import plotly.graph_objs as go
+
 
 def format_price(price):
     '''
@@ -350,8 +352,22 @@ if __name__ == '__main__':
 
                     # And the graph for the specific neighbourhood
                     DATA = [go.Scatter(x=NH_DF['Price'], y=NH_DF['Size'],
-                                       hovertext=NH_DF['URL'], mode='markers',)]
+                                       hovertext=NH_DF.index, mode='markers',)]
                     FIG = go.Figure(data=DATA, layout=LAYOUT)
                     pyo.iplot(FIG, filename=f'{NH_DET}.html')
 
-                    MORE_DETAILS = str()
+                    # Let's give the user the oportunity to check an specific item
+                    CHECK_ITEM = str()
+                    while CHECK_ITEM.lower() != 'q':
+                        CHECK_ITEM = input('Type number of item you wanna check'
+                                           ' (q to quit): ')
+                        try:
+                            if int(CHECK_ITEM) in NH_DF.index:
+                                print(NH_DF)
+                                ITEM_URL = NH_DF.loc[int(CHECK_ITEM)]['URL']
+                                webbrowser.open(ITEM_URL, new=2)
+                        except e:
+                            print(e)
+                            continue
+
+        MORE_DETAILS = str()
