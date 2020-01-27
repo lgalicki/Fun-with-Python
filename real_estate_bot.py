@@ -366,8 +366,7 @@ if __name__ == '__main__':
                                 print(NH_DF)
                                 ITEM_URL = NH_DF.loc[int(CHECK_ITEM)]['URL']
                                 webbrowser.open(ITEM_URL, new=2)
-                        except e:
-                            print(e)
+                        except ValueError:
                             continue
 
         MORE_DETAILS = str()
