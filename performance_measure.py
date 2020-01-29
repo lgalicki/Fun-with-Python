@@ -9,6 +9,7 @@ This module contains a decorator you can use to measure the time it takes for
 your functions to be executed.
 """
 import time
+from datetime import timedelta
 import functools
 
 def performance_measure(func):
@@ -26,7 +27,7 @@ def performance_measure(func):
     tuple
         It contais two positions: the return of the decorated function is placed
         in the first postion, and in the second the ammount of time calculated
-        by this decorator.
+        by this decorator in timedelta format.
 
     '''
 
@@ -39,7 +40,8 @@ def performance_measure(func):
         result = func(*args, **kwargs)
         end_time = time.time()
         elapsed_time = end_time - ini_time
-        return result, elapsed_time
+        formatted_time = timedelta(seconds=elapsed_time)
+        return result, formatted_time
 
     return wrapper_performance_measure
 
@@ -54,4 +56,5 @@ if __name__ == ('__main__'):
         return [1, 2, 3], ('a', 'b', 'c')
 
     RES = example(2)
-    print(f'Result of decorated function: {RES}')
+    print(f'Function returned: {RES[0]}')
+    print(f'Its execution time was: {RES[1]}')
