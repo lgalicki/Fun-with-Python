@@ -47,7 +47,7 @@ def create_zip(file_name):
         Relative path and of the zip file created.
 
     '''
-    # Evaluating the file name - TEMPORARY CODE!
+    # Evaluating the file name
     if not os.path.isfile(file_name):
         raise OSError(f'Invalid file: "{file_name}".')
 
@@ -61,7 +61,8 @@ def create_zip(file_name):
     date_time = date_time.replace(' ', '-')
     date_time = date_time.replace(':', '')
     date_time = date_time[:-7]
-    zip_file_name = f'backups/{file_name}_{date_time}.zip'
+    isolated_file_name = file_name.split('/')[-1]
+    zip_file_name = f'backups/{isolated_file_name}_{date_time}.zip'
 
     # Creating the zipped backup
     backup_zip = zipfile.ZipFile(zip_file_name, 'w')
@@ -101,11 +102,10 @@ if __name__ == '__main__':
     except (OSError, RuntimeError) as exception:
         print(exception)
 
-    except Exception as exception:
+    except Exception:
         TB = traceback.format_exc()
-        DET_EXCEPTION = exception.with_traceback(TB)
 
         if 'NOTIFY_EMAIL' in locals():
-            sg.send_email(NOTIFY_EMAIL, 'Error in backup process', DET_EXCEPTION)
+            sg.send_email(NOTIFY_EMAIL, 'Error in backup process', TB)
         else:
-            print(DET_EXCEPTION)
+            print(TB)
